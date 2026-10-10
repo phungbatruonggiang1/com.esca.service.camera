@@ -1,0 +1,23 @@
+[Unit]
+Description=ESCA camera service
+# dbus.socket, not dbus.service: the bus must be reachable before we try to
+# take our name, but we do not want to order ourselves after every bus client.
+Requires=dbus.socket
+After=dbus.socket
+
+[Service]
+Type=dbus
+BusName=vn.sparc.esca.Camera1
+ExecStart=/usr/sbin/esca-camerad
+# The camera holds kernel buffers; a crash with the device open leaves it
+# unusable until the process is gone, so let systemd reap and restart us.
+Restart=on-failure
+RestartSec=2
+
+# Runs as root for now: libcamera needs /dev/video*, /dev/media* and
+# /dev/dma_heap/*, and getting a dedicated user through all three is an open
+# question in the design document rather than a decision.
+User=root
+
+[Install]
+WantedBy=multi-user.target
