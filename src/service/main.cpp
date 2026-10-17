@@ -27,7 +27,7 @@ int main()
     using namespace esca::camera;
 
     try {
-        auto connection = sdbus::createBusConnection(sdbus::ServiceName{ kServiceName });
+        auto connection = sdbus::createSystemBusConnection(sdbus::ServiceName{ kServiceName });
         g_connection = connection.get();
 
         std::signal(SIGINT, handle_signal);

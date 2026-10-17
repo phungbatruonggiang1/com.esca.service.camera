@@ -2,8 +2,11 @@
 
 #include <atomic>
 #include <cerrno>
+#include <chrono>
 #include <cstring>
+#include <cstdio>
 #include <fcntl.h>
+#include <grp.h>
 #include <poll.h>
 #include <stdexcept>
 #include <sys/eventfd.h>
@@ -87,6 +90,18 @@ Publisher::Publisher(const std::string &name, const FrameFormat &format,
     impl_->fd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0640);
     if (impl_->fd < 0)
         throw std::runtime_error("shm_open " + name + ": " + std::strerror(errno));
+
+    // The service runs as root but its clients do not: a viewer started by
+    // the application manager runs as weston. The D-Bus policy already says
+    // the camera group is who may see frames, so the frames themselves
+    // belong to that group too -- 0640 root:root would let a client ask for
+    // a buffer over the bus and then be unable to read it.
+    if (const group *grp = getgrnam("camera")) {
+        if (fchown(impl_->fd, static_cast<uid_t>(-1), grp->gr_gid) < 0) {
+            std::fprintf(stderr, "esca-camera: cannot give %s to the camera group: %s\n",
+                         name.c_str(), std::strerror(errno));
+        }
+    }
 
     if (ftruncate(impl_->fd, static_cast<off_t>(impl_->bytes)) < 0) {
         int err = errno;
@@ -241,32 +256,47 @@ bool Subscriber::wait(int timeout_ms)
     if (!impl_->base)
         return false;
 
-    // Already behind? Then there is nothing to wait for.
-    if (impl_->header()->latest_seq.load(std::memory_order_acquire) > impl_->last_seq)
-        return true;
+    const bool forever = timeout_ms < 0;
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::milliseconds(forever ? 0 : timeout_ms);
 
-    if (impl_->signal_fd < 0) {
-        // No signal fd: fall back to a short sleep-poll so callers still work.
-        const int step = 5;
-        int waited = 0;
-        while (timeout_ms < 0 || waited < timeout_ms) {
-            usleep(step * 1000);
-            waited += step;
-            if (impl_->header()->latest_seq.load(std::memory_order_acquire) > impl_->last_seq)
-                return true;
+    for (;;) {
+        // Already behind? Then there is nothing to wait for.
+        if (impl_->header()->latest_seq.load(std::memory_order_acquire) > impl_->last_seq)
+            return true;
+
+        int remaining = -1;
+        if (!forever) {
+            const auto now = std::chrono::steady_clock::now();
+            if (now >= deadline)
+                return false;
+            remaining = static_cast<int>(
+                std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now).count());
         }
-        return false;
+
+        if (impl_->signal_fd < 0) {
+            // No signal fd: fall back to a short sleep-poll so callers still work.
+            usleep(5 * 1000);
+            continue;
+        }
+
+        struct pollfd pfd { impl_->signal_fd, POLLIN, 0 };
+        int rc = poll(&pfd, 1, remaining);
+        if (rc < 0 && errno == EINTR)
+            continue;
+        if (rc <= 0)
+            return false;
+
+        // The counter accumulates one tick per frame published, including the
+        // frames we read without ever polling -- a client slower than the
+        // camera skips the poll whenever it is already behind. Draining it
+        // therefore says nothing about whether a *new* frame exists, so the
+        // sequence number decides, and a stale tick costs another turn of this
+        // loop rather than a spurious timeout.
+        uint64_t drained = 0;
+        ssize_t n = ::read(impl_->signal_fd, &drained, sizeof(drained));
+        (void)n;
     }
-
-    struct pollfd pfd { impl_->signal_fd, POLLIN, 0 };
-    int rc = poll(&pfd, 1, timeout_ms);
-    if (rc <= 0)
-        return false;
-
-    uint64_t drained = 0;
-    ssize_t n = ::read(impl_->signal_fd, &drained, sizeof(drained));
-    (void)n;
-    return impl_->header()->latest_seq.load(std::memory_order_acquire) > impl_->last_seq;
 }
 
 bool Subscriber::read(std::vector<uint8_t> &out, FrameInfo &info)

@@ -21,6 +21,27 @@ constexpr unsigned int kDefaultWidth = 1280;
 constexpr unsigned int kDefaultHeight = 720;
 constexpr unsigned int kDefaultFps = 30;
 
+/// libcamera permits exactly one CameraManager per process: constructing a
+/// second one is a fatal error inside the library, which aborts the whole
+/// service. The manager is therefore shared by every HAL instance.
+///
+/// It is deliberately never stopped or deleted. Stopping it while another HAL
+/// still holds a camera would be worse than leaking it, and process exit tears
+/// it down anyway.
+CameraManager &shared_manager()
+{
+    static CameraManager *instance = [] {
+        auto *manager = new CameraManager();
+        const int ret = manager->start();
+        if (ret < 0) {
+            delete manager;
+            throw std::runtime_error("CameraManager::start failed: " + std::to_string(ret));
+        }
+        return manager;
+    }();
+    return *instance;
+}
+
 PixelFormat pixel_format_from_fourcc(uint32_t fourcc)
 {
     if (fourcc == 0)
@@ -54,22 +75,17 @@ class LibcameraHal final : public IHal {
 public:
     LibcameraHal()
     {
-        manager_ = std::make_unique<CameraManager>();
-        int ret = manager_->start();
-        if (ret < 0)
-            throw std::runtime_error("CameraManager::start failed: " + std::to_string(ret));
+        // Touch it here so a broken libcamera fails at construction rather
+        // than at the first enumerate().
+        shared_manager();
     }
 
-    ~LibcameraHal() override
-    {
-        close();
-        manager_->stop();
-    }
+    ~LibcameraHal() override { close(); }
 
     std::vector<DeviceInfo> enumerate() override
     {
         std::vector<DeviceInfo> out;
-        for (const auto &camera : manager_->cameras()) {
+        for (const auto &camera : shared_manager().cameras()) {
             DeviceInfo info;
             info.id = camera->id();
             info.model = model_string(camera);
@@ -99,7 +115,7 @@ public:
         if (camera_)
             close();
 
-        camera_ = manager_->get(camera_id);
+        camera_ = shared_manager().get(camera_id);
         if (!camera_) {
             error = "no such camera: " + camera_id;
             return false;
@@ -330,7 +346,6 @@ private:
         on_frame_(base, total, meta.timestamp);
     }
 
-    std::unique_ptr<CameraManager> manager_;
     std::shared_ptr<Camera> camera_;
     std::unique_ptr<CameraConfiguration> config_;
     std::unique_ptr<FrameBufferAllocator> allocator_;

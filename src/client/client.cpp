@@ -1,5 +1,6 @@
 #include "esca/camera/client.hpp"
 
+#include <chrono>
 #include <unistd.h>
 
 #include <sdbus-c++/sdbus-c++.h>
@@ -33,7 +34,14 @@ struct CameraClient::Impl {
 
 CameraClient::CameraClient() : impl_(std::make_unique<Impl>())
 {
-    impl_->proxy = sdbus::createProxy(sdbus::ServiceName{ kServiceName },
+    // The system bus, explicitly. The plain createProxy() would ask sd-bus
+    // for the default bus, which is the *session* bus whenever
+    // DBUS_SESSION_BUS_ADDRESS is set -- and it is, for every application
+    // the display manager starts. The service lives on the system bus, so a
+    // client run as weston would otherwise look for it on the wrong bus and
+    // be told, confusingly, that no camera exists.
+    impl_->proxy = sdbus::createProxy(sdbus::createSystemBusConnection(),
+                                      sdbus::ServiceName{ kServiceName },
                                       sdbus::ObjectPath{ kObjectPath });
 }
 
@@ -232,9 +240,26 @@ void CameraClient::stop()
 
 bool CameraClient::next_frame(std::vector<uint8_t> &out, FrameInfo &info, int timeout_ms)
 {
-    if (!impl_->subscriber.wait(timeout_ms))
-        return false;
-    return impl_->subscriber.read(out, info);
+    // read() returns false both for "nothing new" and for "the writer
+    // overwrote that slot while I was copying it". The second is normal for a
+    // slow consumer -- an inference client spends longer on a frame than the
+    // camera takes to fill the ring -- and the answer is to take the next
+    // frame, not to give up. Only the deadline ends the loop.
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+    for (;;) {
+        const auto now = std::chrono::steady_clock::now();
+        if (now >= deadline)
+            return false;
+
+        const int remaining =
+            static_cast<int>(std::chrono::duration_cast<std::chrono::milliseconds>(deadline - now)
+                                 .count());
+        if (!impl_->subscriber.wait(remaining))
+            return false;
+        if (impl_->subscriber.read(out, info))
+            return true;
+    }
 }
 
 FrameFormat CameraClient::frame_format() const

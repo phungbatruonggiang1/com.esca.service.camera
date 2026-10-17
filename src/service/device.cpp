@@ -5,9 +5,10 @@
 namespace esca::camera {
 
 namespace {
-// Four slots absorbs a reader that stalls for three frames without letting a
-// slow client push memory use up: at 1280x720 YUV420 a slot is 1.3 MB.
-constexpr uint32_t kSlots = 4;
+// Eight slots at 1280x720 YUV420 is 10 MB and a quarter of a second of slack
+// at 30 fps. Four was not enough: an inference client needs ~95 ms per frame,
+// so the writer lapped the slot it was reading and every other read raced.
+constexpr uint32_t kSlots = 8;
 } // namespace
 
 CameraDevice::CameraDevice(std::unique_ptr<IHal> hal, DeviceInfo info)
