@@ -9,8 +9,7 @@
 namespace esca::camera {
 
 namespace {
-// Negative returns are errors; the detail is in GetErrorMessage(), as in the
-// ATLAS client API.
+// Negative returns are errors; the detail is in GetErrorMessage().
 constexpr int32_t kOk = 0;
 constexpr int32_t kErr = -1;
 } // namespace

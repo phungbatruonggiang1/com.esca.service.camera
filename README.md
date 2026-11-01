@@ -4,7 +4,7 @@ One process owns the camera; several applications read its frames. A camera
 admits a single owner, so without a service in the middle the dashboard, a
 recorder and a vision job cannot coexist.
 
-The design, and what it borrows from the ATLAS Camera Framework, is in
+The design is in
 `meta-sparc-esca/docs/camera-service-design.md`. This is phase 1 of it.
 
 ## Shape
@@ -53,8 +53,7 @@ frames, and neither disturbs the other.
 Signals: `FaultEvent(s, s)`, `DeviceAdded(s)`, `DeviceRemoved(s)`.
 
 Methods return a status rather than throwing a D-Bus error, and the detail
-comes from `GetErrorMessage()` — the ATLAS client API works the same way, and
-it keeps the client library free of exception translation.
+comes from `GetErrorMessage()`. That keeps the client library free of exception translation.
 
 ## Decisions worth knowing about
 
@@ -77,7 +76,7 @@ options; this one is at least predictable.
 `/dev/media*` and `/dev/dma_heap/*`. Clients do not: D-Bus policy grants the
 `camera` group access, and the recipe creates that group.
 
-**One process, for now.** ATLAS spawns a service per camera so a HAL crash
+**One process, for now.** A service per camera would mean a HAL crash
 cannot take the framework with it. Here `CameraDevice` is that seam but runs
 in-process; until it moves out, a HAL fault kills the service and systemd
 restarts it.

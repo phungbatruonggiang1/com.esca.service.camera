@@ -6,7 +6,7 @@
 // A dashboard wants the current frame, not a backlog, and a slow reader must
 // never stall the camera.
 //
-// The ATLAS design puts iceoryx2 here. No iceoryx recipe exists in our layers,
+// iceoryx2 would fit here, but no iceoryx recipe exists in our layers,
 // so this is the same split -- publisher, subscriber, signal fd -- over
 // shm_open + eventfd. Swapping in iceoryx later means reimplementing these two
 // classes, not changing their users.

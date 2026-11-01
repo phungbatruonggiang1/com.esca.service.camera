@@ -1,7 +1,6 @@
 // Hardware abstraction for the camera.
 //
-// The ATLAS framework loads a HAL plugin (libhal-v4l2.so) chosen from a
-// registry file. Here the libcamera implementation is linked in, because it is
+// A HAL could be a plugin chosen from a registry file. Here the libcamera implementation is linked in, because it is
 // the only one: the IMX219 is a CSI sensor behind unicam, so the frames are raw
 // Bayer and need the VC4 ISP, which libcamera owns. Raw V4L2 would mean
 // reimplementing the ISP pipeline.

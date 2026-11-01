@@ -1,7 +1,7 @@
 // One camera, its HAL and its frame buffer, with the client bookkeeping that
 // lets several applications share it.
 //
-// In the ATLAS design this lives in a process of its own, spawned per camera,
+// Ideally this lives in a process of its own, spawned per camera,
 // so a HAL crash cannot take the service with it. Phase 1 keeps it in-process:
 // the seam is this class, and moving it out is a packaging change rather than
 // a redesign. Until then, a HAL fault takes the service down and systemd
